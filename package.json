@@ -1,0 +1,43 @@
+{
+  "name": "tiny-idb",
+  "version": "1.0.0",
+  "description": "An extremely fast, super simple, and dependency-free IndexedDB wrapper. A drop-in replacement for localStorage with reliability and durability.",
+  "main": "tiny-idb.js",
+  "module": "tiny-idb.js",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jelodar/tiny-idb.git"
+  },
+  "keywords": [
+    "indexeddb",
+    "storage",
+    "localstorage",
+    "simple",
+    "wrapper",
+    "db",
+    "browser",
+    "persistent",
+    "nosql",
+    "key-value"
+  ],
+  "author": "Jelodar",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Jelodar/tiny-idb/issues"
+  },
+  "homepage": "https://github.com/Jelodar/tiny-idb#readme",
+  "files": [
+    "tiny-idb.js",
+    "tiny-idb.min.js",
+    "LICENSE",
+    "README.md"
+  ],
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5",
+    "terser": "^5.46.1"
+  },
+  "scripts": {
+    "test": "node test.js"
+  }
+}
