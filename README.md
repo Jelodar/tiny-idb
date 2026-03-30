@@ -17,7 +17,7 @@ Native IndexedDB requires managing requests, transactions, and version upgrades.
 The primary weakness of most storage wrappers is the "read-modify-write" race condition. If two parts of an application attempt to update the same key simultaneously, data loss often occurs. `tiny-idb` addresses this by executing `update`, `push`, and `merge` operations within a single IndexedDB transaction, ensuring that updates are processed sequentially and reliably.
 
 ### Resource Efficiency
-At only **596 bytes** (gzipped), the library introduces negligible overhead to your bundle. It is dependency-free and written in modern vanilla JavaScript, ensuring high performance across all environments that support IndexedDB.
+At only **611 bytes** (gzipped), the library introduces negligible overhead to your bundle. It is dependency-free and written in modern vanilla JavaScript, ensuring high performance across all environments that support IndexedDB.
 
 ### Intelligent Lifecycle Management
 The library handles database connection pooling, tab synchronization, and error recovery automatically. If a database connection is blocked by another tab or fails due to an environmental error, `tiny-idb` gracefully resets and recovers without requiring a page reload.
@@ -39,7 +39,7 @@ npm install tiny-idb
 </script>
 ```
 
-*   **Minified Module**: `https://unpkg.com/tiny-idb/tiny-idb.min.js` (596 bytes gzipped)
+*   **Minified Module**: `https://unpkg.com/tiny-idb/tiny-idb.min.js` (598 bytes gzipped)
 *   **Source**: `https://unpkg.com/tiny-idb/tiny-idb.js`
 
 ## Technical Comparison
@@ -65,7 +65,68 @@ npm install tiny-idb
 | `count()` | Returns the total number of entries. |
 | `update(key, fn)` | Performs an atomic read-modify-write operation. |
 | `push(key, value)` | Atomically appends a value to an array. |
-| `merge(key, object)` | Atomically shallow-merges an object. |
+| `merge(key, patch)` | Atomically shallow-merges an object. |
+
+## Example Use Cases
+
+### User Settings Management
+Easily manage and update partial user preferences without worrying about race conditions.
+```javascript
+import { tinyIDB } from 'tiny-idb';
+
+// Initial setup
+await tinyIDB.set('settings', { theme: 'dark', notifications: true });
+
+// Later, merge new settings
+await tinyIDB.merge('settings', { notifications: false, language: 'en' });
+
+// Result: { theme: 'dark', notifications: false, language: 'en' }
+```
+
+### Persistent Shopping Cart
+Atomically add items to a list, ensuring no items are lost during concurrent updates.
+```javascript
+// Add items from different parts of the UI
+await tinyIDB.push('cart', { id: 101, qty: 1 });
+await tinyIDB.push('cart', { id: 202, qty: 2 });
+
+const cart = await tinyIDB.get('cart');
+console.log(`Items in cart: ${cart.length}`);
+```
+
+### Atomic Counters
+Safely increment values using the `update` method.
+```javascript
+await tinyIDB.set('page_views', 0);
+
+// Increment safely
+await tinyIDB.update('page_views', count => (count || 0) + 1);
+```
+
+### localStorage Compatibility
+`tiny-idb` provides aliases for `get`, `set`, and `remove` to match the `localStorage` API.
+```javascript
+await tinyIDB.setItem('session_id', 'xyz-123');
+const sid = await tinyIDB.getItem('session_id');
+await tinyIDB.removeItem('session_id');
+```
+
+## Development
+
+### Running Tests
+```bash
+npm test
+```
+
+### Running Tests on Minified Build
+```bash
+npm run test:min
+```
+
+### Build
+```bash
+npm run build
+```
 
 ## License
 

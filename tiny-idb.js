@@ -6,14 +6,14 @@
  * @license MIT
  */
 
-const DB_NAME = 'tiny-idb', STORE_NAME = 's', VERSION = 1;
+const DB_NAME = 'tiny-idb', STORE_NAME = 's', READ_WRITE = 'readwrite', READ_ONLY = 'readonly';
 let dbPromise;
 
 const getDB = () => dbPromise || (dbPromise = new Promise((resolve, reject) => {
-  const req = indexedDB.open(DB_NAME, VERSION);
-  req.onupgradeneeded = e => e.target.result.createObjectStore(STORE_NAME);
-  req.onsuccess = e => {
-    const db = e.target.result;
+  const req = indexedDB.open(DB_NAME, 1);
+  req.onupgradeneeded = () => req.result.createObjectStore(STORE_NAME);
+  req.onsuccess = () => {
+    const db = req.result;
     db.onversionchange = () => { db.close(); dbPromise = null; };
     resolve(db);
   };
@@ -27,29 +27,35 @@ const prom = (req) => new Promise((res, rej) => {
 
 const tx = async (mode, cb) => {
   const db = await getDB();
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     const t = db.transaction(STORE_NAME, mode);
-    let res;
-    try { res = cb(t.objectStore(STORE_NAME)); } catch (e) { t.abort(); return reject(e); }
-    t.oncomplete = () => resolve(res);
-    t.onerror = () => reject(t.error);
+    t.onabort = t.onerror = () => reject(t.error || new DOMException('Aborted'));
+    try {
+      const res = await cb(t.objectStore(STORE_NAME));
+      t.oncomplete = () => resolve(res);
+    } catch (e) {
+      try { t.abort(); } catch {}
+      reject(e);
+    }
   });
 };
 
 export const tinyIDB = {
-  set: (k, v) => tx('readwrite', s => prom(s.put(v, k))),
-  get: k => tx('readonly', s => prom(s.get(k))),
-  remove: k => tx('readwrite', s => prom(s.delete(k))),
-  clear: () => tx('readwrite', s => prom(s.clear())),
-  keys: () => tx('readonly', s => prom(s.getAllKeys())),
-  values: () => tx('readonly', s => prom(s.getAll())),
-  count: () => tx('readonly', s => prom(s.count())),
-  update: async (k, fn) => tx('readwrite', async s => {
-    const n = await fn(await prom(s.get(k)));
-    return prom(s.put(n, k));
+  set: (key, value) => tx(READ_WRITE, s => prom(s.put(value, key))),
+  get: key => tx(READ_ONLY, s => prom(s.get(key))),
+  remove: k => tx(READ_WRITE, s => prom(s.delete(k))),
+  clear: () => tx(READ_WRITE, s => prom(s.clear())),
+  keys: () => tx(READ_ONLY, s => prom(s.getAllKeys())),
+  values: () => tx(READ_ONLY, s => prom(s.getAll())),
+  count: () => tx(READ_ONLY, s => prom(s.count())),
+  update: async (key, fn) => tx(READ_WRITE, async s => {
+    const n = await fn(await prom(s.get(key)));
+    return prom(s.put(n, key));
   }),
-  push: (k, v) => tinyIDB.update(k, c => [...(Array.isArray(c) ? c : []), v]),
-  merge: (k, p) => tinyIDB.update(k, c => ({ ...(c && typeof c === 'object' ? c : {}), ...p }))
+  push: (key, value) => tinyIDB.update(key, c => [...(Array.isArray(c) ? c : []), value]),
+  merge: (key, patch) => tinyIDB.update(key, c => ({ ...(c && typeof c === 'object' ? c : {}), ...patch }))
 };
+
+['get', 'set', 'remove'].forEach(method => tinyIDB[method + 'Item'] = tinyIDB[method]);
 
 export default tinyIDB;
