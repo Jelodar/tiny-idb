@@ -17,13 +17,13 @@ Native IndexedDB requires managing requests, transactions, and version upgrades.
 The primary weakness of most storage wrappers is the "read-modify-write" race condition. If two parts of an application attempt to update the same key simultaneously, data loss often occurs. `tiny-idb` addresses this by executing `update`, `push`, and `merge` operations within a single IndexedDB transaction, ensuring that updates are processed sequentially and reliably.
 
 ### Resource Efficiency
-At only **611 bytes** (gzipped), the library introduces negligible overhead to your bundle. It is dependency-free and written in modern vanilla JavaScript, ensuring high performance across all environments that support IndexedDB.
+At **less than 1KB** (gzipped), the library introduces negligible overhead to your bundle. It is dependency-free and written in modern vanilla JavaScript, ensuring high performance across all environments that support IndexedDB.
 
 ### Intelligent Lifecycle Management
 The library handles database connection pooling, tab synchronization, and error recovery automatically. If a database connection is blocked by another tab or fails due to an environmental error, `tiny-idb` gracefully resets and recovers without requiring a page reload.
 
 ### Zero-Configuration Portability
-Beyond npm installation, `tiny-idb` is designed for maximum portability. As a single-file, dependency-free module, it can be integrated into any environment by simply dropping `tiny-idb.js` into a project directory. This makes it an ideal solution for rapid prototyping, legacy system upgrades, and environments where complex build pipelines are unavailable.
+Beyond npm installation, `tiny-idb` is designed for maximum portability. As a single-file, dependency-free module, it can be integrated into any environment by simply dropping `tiny-idb.js` into a project directory. **No build step, compilation, or transpilation is required.** This makes it an ideal solution for rapid prototyping, legacy system upgrades, and environments where complex build pipelines are unavailable.
 
 ## Installation
 
@@ -39,7 +39,7 @@ npm install tiny-idb
 </script>
 ```
 
-*   **Minified Module**: `https://unpkg.com/tiny-idb/tiny-idb.min.js` (598 bytes gzipped)
+*   **Minified Module**: `https://unpkg.com/tiny-idb/tiny-idb.min.js` (less than 1KB gzipped)
 *   **Source**: `https://unpkg.com/tiny-idb/tiny-idb.js`
 
 ## Technical Comparison
@@ -47,7 +47,7 @@ npm install tiny-idb
 | Feature | localStorage | tiny-idb |
 |---------|--------------|----------|
 | **Execution** | Synchronous (Blocks UI) | Asynchronous (Non-blocking) |
-| **Storage Limit** | ~5-10MB | Disk-limited |
+| **Storage Limit** | ~5-10MB | Virtually unlimited (until disk is full) |
 | **Data Types** | Strings only | Objects, Blobs, Arrays, Numbers |
 | **Data Integrity** | Basic | ACID Compliant |
 | **Race Condition Safety** | None | Atomic `update`/`push`/`merge` |
@@ -56,6 +56,7 @@ npm install tiny-idb
 
 | Method | Description |
 |--------|-------------|
+| `open(db, store?)` | Creates or retrieves a cached instance. `store` defaults to `db` name. |
 | `get(key)` | Retrieves a value; returns `undefined` if not found. |
 | `set(key, value)` | Persists a value to the store. |
 | `remove(key)` | Deletes a specific key. |
@@ -111,7 +112,31 @@ const sid = await tinyIDB.getItem('session_id');
 await tinyIDB.removeItem('session_id');
 ```
 
+### Simple Custom Database
+If you only need one store per database, you can omit the `storeName`. It will automatically default to the same name as the database.
+```javascript
+// Creates/retrieves a DB named 'my-store' with an internal store also named 'my-store'
+const store = tinyIDB.open('my-store');
+
+await store.set('key', 'value');
+```
+
+### Multi-Instance Support
+Use `open` to create isolated storage instances. Instances are cached internally.
+```javascript
+import { tinyIDB } from 'tiny-idb';
+
+// Create isolated storage instances
+const settings = tinyIDB.open('app-db', 'settings');
+const cache = tinyIDB.open('app-db', 'cache');
+
+await settings.set('theme', 'dark');
+await cache.set('temp_data', { id: 1 });
+```
+
 ## Development
+
+`tiny-idb` is written in pure vanilla JavaScript. No compilation is required for development.
 
 ### Running Tests
 ```bash
@@ -123,9 +148,10 @@ npm test
 npm run test:min
 ```
 
-### Build
+### Minification
+Generate the production-ready minified file:
 ```bash
-npm run build
+npm run minify
 ```
 
 ## License

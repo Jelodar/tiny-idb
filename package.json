@@ -1,6 +1,6 @@
 {
   "name": "tiny-idb",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "An extremely fast, super simple, and dependency-free IndexedDB wrapper. A drop-in replacement for localStorage with reliability and durability.",
   "main": "tiny-idb.js",
   "module": "tiny-idb.js",
@@ -40,6 +40,6 @@
   "scripts": {
     "test": "node test.js",
     "test:min": "TEST_MIN=1 node test.js",
-    "build": "terser tiny-idb.js -o tiny-idb.min.js -c toplevel,unsafe -m toplevel --comments false"
+    "minify": "terser tiny-idb.js -o tiny-idb.min.js -c toplevel,unsafe -m toplevel --comments false"
   }
 }

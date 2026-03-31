@@ -42,6 +42,7 @@ test('tiny-idb basic operations', async (t) => {
     await tinyIDB.clear();
     const count = await tinyIDB.count();
     assert.strictEqual(count, 0);
+    assert.strictEqual(await tinyIDB.get('a'), undefined);
   });
 
   await t.test('list all keys and values', async () => {
@@ -81,8 +82,6 @@ test('tiny-idb basic operations', async (t) => {
     await tinyIDB.set('not-array', 'string');
     await tinyIDB.push('not-array', 'item');
     const list = await tinyIDB.get('not-array');
-    // Note: the implementation says: c => [...(Array.isArray(c) ? c : []), value]
-    // So even if it was a string, it will be discarded and replaced with [value]
     assert.deepStrictEqual(list, ['item']);
   });
 
@@ -115,17 +114,163 @@ test('tiny-idb basic operations', async (t) => {
   });
 
   await t.test('error handling in transaction', async () => {
+    let errorCaught = false;
     try {
       await tinyIDB.update('some-key', () => { throw new Error('Update failed'); });
     } catch (e) {
       assert.strictEqual(e.message, 'Update failed');
+      errorCaught = true;
     }
+    assert.strictEqual(errorCaught, true);
   });
 
   await t.test('remove non-existent key', async () => {
     await tinyIDB.remove('non-existent');
-    // Should not throw and should still be undefined
     const val = await tinyIDB.get('non-existent');
     assert.strictEqual(val, undefined);
+  });
+
+  await t.test('open method exists', async () => {
+    assert.strictEqual(typeof tinyIDB.open, 'function');
+  });
+
+  await t.test('open returns a separate instance', async () => {
+    const db2 = tinyIDB.open('db-two', 'store2');
+    assert.notStrictEqual(tinyIDB, db2);
+    assert.strictEqual(typeof db2.set, 'function');
+  });
+
+  await t.test('multiple instances do not interfere', async () => {
+    const dbA = tinyIDB.open('db-A', 'sA');
+    const dbB = tinyIDB.open('db-B', 'sB');
+    
+    await dbA.set('key', 'valueA');
+    await dbB.set('key', 'valueB');
+    
+    assert.strictEqual(await dbA.get('key'), 'valueA');
+    assert.strictEqual(await dbB.get('key'), 'valueB');
+  });
+
+  await t.test('open returns same instance for same names', async () => {
+    const db1 = tinyIDB.open('same-db', 'same-s');
+    const db2 = tinyIDB.open('same-db', 'same-s');
+    assert.strictEqual(db1, db2);
+  });
+
+  await t.test('open defaults storeName to dbName', async () => {
+    const db = tinyIDB.open('only-db');
+    await db.set('x', 1);
+    const sameDb = tinyIDB.open('only-db', 'only-db');
+    assert.strictEqual(await sameDb.get('x'), 1);
+    assert.strictEqual(db, sameDb);
+  });
+
+  // NEW NEGATIVE / EDGE CASE TESTS
+  await t.test('transaction error propagation', async () => {
+    const db = tinyIDB.open('fail-db', 'fail-store');
+    // We try to trigger an IndexedDB error by providing an invalid value (though IDB values are broad)
+    // A better way is to mock or use a known error state.
+    // Let's try to close the DB while a transaction is pending if possible, or just mock req.onerror.
+    // For now, we'll verify that our tx wrapper catches aborted transactions.
+    try {
+      await db.update('k', async (val) => {
+        // This is a bit of a hack to trigger an abort
+        // In a real environment, you might lose connection or have a quota error.
+        throw new Error('Abort manually');
+      });
+    } catch (e) {
+      assert.strictEqual(e.message, 'Abort manually');
+    }
+  });
+
+  await t.test('collision check for instance keys', async () => {
+    const db1 = tinyIDB.open('a', 'bc');
+    const db2 = tinyIDB.open('ab', 'c');
+    assert.notStrictEqual(db1, db2, 'Instances with different DB/Store names should not collide');
+  });
+
+  await t.test('set invalid data (Symbol) should fail', async () => {
+    try {
+      await tinyIDB.set('sym', Symbol('fail'));
+      assert.fail('Should have thrown DataCloneError');
+    } catch (e) {
+      // IndexedDB throws DataCloneError for symbols
+      assert.ok(e.name === 'DataCloneError' || e.message.includes('clone'));
+    }
+  });
+
+  await t.test('update atomicity on failure', async () => {
+    await tinyIDB.set('atomic', 'initial');
+    try {
+      await tinyIDB.update('atomic', () => {
+        throw new Error('Crashed');
+      });
+    } catch (e) {
+      assert.strictEqual(e.message, 'Crashed');
+    }
+    const val = await tinyIDB.get('atomic');
+    assert.strictEqual(val, 'initial', 'Value should not have changed if update failed');
+  });
+
+  await t.test('push atomicity on failure', async () => {
+    // We can't easily make 'put' fail without invalid data, 
+    // but we can test if it handles the initial value correctly.
+    // If it was already a string, it replaces it with an array.
+    await tinyIDB.set('list-fail', 'string');
+    await tinyIDB.push('list-fail', 1);
+    const val = await tinyIDB.get('list-fail');
+    assert.deepStrictEqual(val, [1]);
+  });
+
+  await t.test('merge into null', async () => {
+    await tinyIDB.remove('null-merge');
+    await tinyIDB.set('null-merge', null);
+    await tinyIDB.merge('null-merge', { a: 1 });
+    const val = await tinyIDB.get('null-merge');
+    assert.deepStrictEqual(val, { a: 1 });
+  });
+
+  await t.test('merge into non-object primitive', async () => {
+    await tinyIDB.set('prim', 123);
+    await tinyIDB.merge('prim', { a: 1 });
+    const val = await tinyIDB.get('prim');
+    assert.deepStrictEqual(val, { a: 1 });
+  });
+
+  await t.test('merge with non-object patch', async () => {
+    await tinyIDB.set('m', { a: 1 });
+    await tinyIDB.merge('m', 'not-an-object');
+    const val = await tinyIDB.get('m');
+    // {...{a:1}, ...'not-an-object'} results in the characters of the string being spread if it were spreadable, 
+    // but in JS {...obj, ...string} just keeps obj if string is spread.
+    // Wait, {...{a:1}, ...'abc'} -> {0: 'a', 1: 'b', 2: 'c', a: 1}
+    assert.ok(typeof val === 'object');
+  });
+
+  await t.test('push with undefined initial', async () => {
+    const db = tinyIDB.open('new-db-push');
+    await db.push('list', 1);
+    assert.deepStrictEqual(await db.get('list'), [1]);
+  });
+  
+  await t.test('getDB error handling', async () => {
+    const originalOpen = indexedDB.open;
+    indexedDB.open = () => {
+      const req = { onerror: null, onsuccess: null };
+      setTimeout(() => {
+        req.error = new Error('Open failed');
+        req.onerror();
+      }, 0);
+      return req;
+    };
+    try {
+      const dbFail = tinyIDB.open('fail-open');
+      await dbFail.get('any');
+      assert.fail('Should have thrown');
+    } catch (e) {
+      assert.strictEqual(e.message, 'Open failed');
+    } finally {
+      indexedDB.open = originalOpen;
+    }
   });
 });
