@@ -2,7 +2,9 @@
 
 **A minimalist, high-performance IndexedDB wrapper for modern web applications.**
 
-`tiny-idb` provides a non-blocking, asynchronous alternative to `localStorage`. It is designed for developers who require the durability and capacity of IndexedDB without the complexity of its native API. By focusing on a single-store, key-value architecture, it eliminates the need for database versioning and boilerplate configuration.
+`tiny-idb` provides a non-blocking, asynchronous alternative to `localStorage`. While `localStorage` is capped at ~5-10MB and can be cleared by the browser under memory pressure, `tiny-idb` leverages IndexedDB to offer virtually unlimited storage (up to 80% of disk space) with much higher durability.
+
+It is designed for developers who require the reliability and capacity of IndexedDB without the complexity of its native API. By focusing on a single-store, key-value architecture, it eliminates the need for database versioning and boilerplate configuration.
 
 [![NPM Version](https://img.shields.io/npm/v/tiny-idb.svg)](https://www.npmjs.com/package/tiny-idb)
 [![License](https://img.shields.io/npm/l/tiny-idb.svg)](LICENSE)

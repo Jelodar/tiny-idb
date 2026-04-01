@@ -1,10 +1,4 @@
-/**
- * tiny-idb - A super simple, fast, and dependency-free IndexedDB wrapper.
- * Designed as a drop-in replacement for localStorage with durability and performance.
- *
- * @author Jelodar
- * @license MIT
- */
+/** tiny-idb - MIT © Jelodar */
 
 const instances = new Map();
 const prom = (req) => new Promise((res, rej) => {
@@ -43,23 +37,20 @@ const getAPI = (dbName = 'tiny-idb', storeName = undefined) => {
     });
   };
 
-  const update = async (key, fn) => tx(RW, async s => {
-    const n = await fn(await prom(s.get(key)));
-    return prom(s.put(n, key));
-  });
+  const update = (key, fn) => tx(RW, async s => prom(s.put(await fn(await prom(s.get(key))), key)));
 
   const api = {
     open: getAPI,
     set: (key, value) => tx(RW, s => prom(s.put(value, key))),
     get: key => tx(RO, s => prom(s.get(key))),
-    remove: k => tx(RW, s => prom(s.delete(k))),
+    remove: key => tx(RW, s => prom(s.delete(key))),
     clear: () => tx(RW, s => prom(s.clear())),
     keys: () => tx(RO, s => prom(s.getAllKeys())),
     values: () => tx(RO, s => prom(s.getAll())),
     count: () => tx(RO, s => prom(s.count())),
     update,
-    push: (key, value) => update(key, c => [...(Array.isArray(c) ? c : []), value]),
-    merge: (key, patch) => update(key, c => ({ ...(c && typeof c === 'object' ? c : {}), ...patch }))
+    push: (key, val) => update(key, (c = []) => [...(Array.isArray(c) ? c : []), val]),
+    merge: (key, obj) => update(key, (c = {}) => ({ ...(c && typeof c === 'object' ? c : {}), ...obj }))
   };
 
   ['get', 'set', 'remove'].forEach(m => api[m + 'Item'] = api[m]);
