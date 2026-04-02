@@ -253,6 +253,64 @@ test('tiny-idb basic operations', async (t) => {
     assert.deepStrictEqual(await db.get('list'), [1]);
   });
   
+  await t.test('list all entries', async () => {
+    await tinyIDB.clear();
+    await tinyIDB.set('k1', 'v1');
+    await tinyIDB.set('k2', 'v2');
+    const entries = await tinyIDB.entries();
+    assert.deepStrictEqual(entries.sort(), [['k1', 'v1'], ['k2', 'v2']]);
+  });
+
+  await t.test('microtask update function (Promise.resolve)', async () => {
+    await tinyIDB.set('micro-key', 1);
+    await tinyIDB.update('micro-key', async (val) => {
+      // Microtasks are fine as they don't yield to the event loop's macro-task queue
+      return Promise.resolve(val + 1);
+    });
+    assert.strictEqual(await tinyIDB.get('micro-key'), 2);
+  });
+
+  await t.test('onversionchange handling', async () => {
+    const db = tinyIDB.open('version-db');
+    await db.set('x', 1);
+    
+    const rawDb = await new Promise((resolve) => {
+      const req = indexedDB.open('version-db', 1);
+      req.onsuccess = () => resolve(req.result);
+    });
+    
+    // In fake-indexeddb we might need to check if it exists or just assign it
+    if (typeof rawDb.onversionchange === 'function' || rawDb.onversionchange === null) {
+        rawDb.onversionchange({ type: 'versionchange' }); 
+    }
+    
+    await db.set('x', 2);
+    assert.strictEqual(await db.get('x'), 2);
+    rawDb.close();
+  });
+
+  await t.test('transaction onabort manual trigger', async () => {
+    const db = tinyIDB.open('abort-db');
+    try {
+      await db.update('k', (s) => {
+        // We throw inside the callback, which should trigger the catch block
+        // and t.abort().
+        throw new Error('Trigger abort');
+      });
+    } catch (e) {
+      assert.strictEqual(e.message, 'Trigger abort');
+    }
+  });
+
+  await t.test('stress test sequential atomic updates', async () => {
+    const db = tinyIDB.open('stress-db');
+    await db.set('count', 0);
+    for (let i = 0; i < 20; i++) {
+        await db.update('count', c => (c || 0) + 1);
+    }
+    assert.strictEqual(await db.get('count'), 20);
+  });
+  
   await t.test('getDB error handling', async () => {
     const originalOpen = indexedDB.open;
     indexedDB.open = () => {

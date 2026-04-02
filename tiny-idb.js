@@ -47,6 +47,10 @@ const getAPI = (dbName = 'tiny-idb', storeName = undefined) => {
     clear: () => tx(RW, s => prom(s.clear())),
     keys: () => tx(RO, s => prom(s.getAllKeys())),
     values: () => tx(RO, s => prom(s.getAll())),
+    entries: () => tx(RO, async s => {
+      const [k, v] = await Promise.all([prom(s.getAllKeys()), prom(s.getAll())]);
+      return k.map((key, i) => [key, v[i]]);
+    }),
     count: () => tx(RO, s => prom(s.count())),
     update,
     push: (key, val) => update(key, (c = []) => [...(Array.isArray(c) ? c : []), val]),

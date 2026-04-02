@@ -10,6 +10,15 @@ It is designed for developers who require the reliability and capacity of Indexe
 [![License](https://img.shields.io/npm/l/tiny-idb.svg)](LICENSE)
 [![Size](https://img.shields.io/bundlephobia/minzip/tiny-idb)](https://bundlephobia.com/package/tiny-idb)
 
+## Why tiny-idb?
+
+There are many IndexedDB wrappers, but `tiny-idb` is built with a specific philosophy: **Smallest possible footprint without sacrificing data integrity.**
+
+-   **Smaller than most icons**: At less than 1KB (gzipped), it's lighter than a 16x16 PNG.
+-   **Atomic Operations**: Built-in `update`, `push`, and `merge` are ACID-compliant and race-condition safe. No more partial updates or data loss.
+-   **Zero dependencies**: Built on pure vanilla JS. No external bloat.
+-   **Drop-in localStorage replacement**: Use the same `getItem`, `setItem`, `removeItem` calls, but with `await`.
+
 ## Core Advantages
 
 ### Architectural Simplicity
@@ -46,13 +55,14 @@ npm install tiny-idb
 
 ## Technical Comparison
 
-| Feature | localStorage | tiny-idb |
+| Feature | `localStorage` | `tiny-idb` |
 |---------|--------------|----------|
 | **Execution** | Synchronous (Blocks UI) | Asynchronous (Non-blocking) |
-| **Storage Limit** | ~5-10MB | Virtually unlimited (until disk is full) |
-| **Data Types** | Strings only | Objects, Blobs, Arrays, Numbers |
+| **Storage Limit** | ~5-10MB (Fixed) | Virtually unlimited (80%+ of disk) |
+| **Data Types** | Strings only (Requires `JSON.parse`) | Objects, Blobs, Arrays, Numbers, Files |
 | **Data Integrity** | Basic | ACID Compliant |
 | **Race Condition Safety** | None | Atomic `update`/`push`/`merge` |
+| **Tab Sync** | No | Automatic |
 
 ## API Reference
 
@@ -65,12 +75,23 @@ npm install tiny-idb
 | `clear()` | Removes all data from the store. |
 | `keys()` | Returns an array of all keys. |
 | `values()` | Returns an array of all values. |
+| `entries()` | Returns an array of `[key, value]` pairs. |
 | `count()` | Returns the total number of entries. |
-| `update(key, fn)` | Performs an atomic read-modify-write operation. |
-| `push(key, value)` | Atomically appends a value to an array. |
-| `merge(key, patch)` | Atomically shallow-merges an object. |
+| `update(key, fn)` | Performs an **atomic** read-modify-write. |
+| `push(key, value)` | **Atomically** appends to an array. |
+| `merge(key, patch)` | **Atomically** shallow-merges an object. |
 
 ## Example Use Cases
+
+### Iterating over Data
+Use `entries()` to easily process all stored key-value pairs.
+```javascript
+const allEntries = await tinyIDB.entries();
+
+for (const [key, value] of allEntries) {
+  console.log(`${key}:`, value);
+}
+```
 
 ### User Settings Management
 Easily manage and update partial user preferences without worrying about race conditions.
@@ -84,6 +105,19 @@ await tinyIDB.set('settings', { theme: 'dark', notifications: true });
 await tinyIDB.merge('settings', { notifications: false, language: 'en' });
 
 // Result: { theme: 'dark', notifications: false, language: 'en' }
+```
+
+### Storing Binary Data (Blobs/Files)
+Unlike `localStorage`, `tiny-idb` can store binary data directly.
+```javascript
+const response = await fetch('/profile-picture.jpg');
+const blob = await response.blob();
+
+await tinyIDB.set('user_avatar', blob);
+
+// Later...
+const avatar = await tinyIDB.get('user_avatar');
+document.querySelector('img').src = URL.createObjectURL(avatar);
 ```
 
 ### Persistent Shopping Cart
@@ -102,7 +136,7 @@ Safely increment values using the `update` method.
 ```javascript
 await tinyIDB.set('page_views', 0);
 
-// Increment safely
+// Increment safely - even if multiple tabs do it at once
 await tinyIDB.update('page_views', count => (count || 0) + 1);
 ```
 
@@ -136,6 +170,15 @@ await settings.set('theme', 'dark');
 await cache.set('temp_data', { id: 1 });
 ```
 
+## Browser Support
+
+`tiny-idb` targets modern browsers that support:
+- [IndexedDB](https://caniuse.com/indexeddb) (98%+)
+- [ES Modules](https://caniuse.com/es6-module)
+- [Async/Await](https://caniuse.com/async-functions)
+
+If you need to support legacy browsers (IE11), you will need to transpile and polyfill.
+
 ## Development
 
 `tiny-idb` is written in pure vanilla JavaScript. No compilation is required for development.
@@ -150,10 +193,10 @@ npm test
 npm run test:min
 ```
 
-### Minification
+### Building & Minification
 Generate the production-ready minified file:
 ```bash
-npm run minify
+npm run build
 ```
 
 ## License
