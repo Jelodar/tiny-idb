@@ -77,11 +77,30 @@ npm install tiny-idb
 | `values()` | Returns an array of all values. |
 | `entries()` | Returns an array of `[key, value]` pairs. |
 | `count()` | Returns the total number of entries. |
+| `raw(cb, mode?)` | Provides direct access to the `IDBObjectStore`. |
 | `update(key, fn)` | Performs an **atomic** read-modify-write. |
 | `push(key, value)` | **Atomically** appends to an array. |
 | `merge(key, patch)` | **Atomically** shallow-merges an object. |
 
 ## Example Use Cases
+
+### Direct IndexedDB Access (Cursors & Search)
+For large datasets where loading everything via `entries()` is inefficient, use `raw()` to perform cursor-based searches or filtered queries.
+```javascript
+const fruits = await tinyIDB.raw(store => {
+  return new Promise((resolve) => {
+    const matches = [];
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (cursor) {
+        if (cursor.value.type === 'fruit') matches.push(cursor.value);
+        cursor.continue();
+      } else resolve(matches);
+    };
+  });
+});
+```
 
 ### Iterating over Data
 Use `entries()` to easily process all stored key-value pairs.

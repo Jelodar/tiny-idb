@@ -55,6 +55,14 @@ export interface TinyIDBInstance {
   count(): Promise<number>;
 
   /**
+   * Direct access to the IDBObjectStore within a transaction.
+   * This provides an "escape hatch" to use native IndexedDB features like cursors, ranges, and search.
+   * @param cb A callback that receives the IDBObjectStore.
+   * @param mode The transaction mode ('readonly' or 'readwrite').
+   */
+  raw<T = any>(cb: (store: IDBObjectStore) => T | Promise<T>, mode?: IDBTransactionMode): Promise<T>;
+
+  /**
    * Performs an atomic read-modify-write operation within a single transaction.
    * Note: The function 'fn' must be synchronous or microtask-only (no await on fetch/setTimeout) 
    * to prevent the IndexedDB transaction from auto-committing.

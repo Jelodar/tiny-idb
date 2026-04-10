@@ -310,6 +310,38 @@ test('tiny-idb basic operations', async (t) => {
     }
     assert.strictEqual(await db.get('count'), 20);
   });
+
+  await t.test('raw method for direct cursor search', async () => {
+    const db = tinyIDB.open('raw-search');
+    await db.clear();
+    await db.set('p1', { type: 'fruit', name: 'apple' });
+    await db.set('p2', { type: 'vegetable', name: 'carrot' });
+    await db.set('p3', { type: 'fruit', name: 'banana' });
+
+    const fruits = await db.raw(store => {
+        return new Promise((resolve) => {
+            const matches = [];
+            const req = store.openCursor();
+            req.onsuccess = () => {
+                const cursor = req.result;
+                if (cursor) {
+                    if (cursor.value.type === 'fruit') matches.push(cursor.value.name);
+                    cursor.continue();
+                } else resolve(matches);
+            };
+        });
+    });
+
+    assert.deepStrictEqual(fruits.sort(), ['apple', 'banana']);
+  });
+
+  await t.test('raw method with readwrite mode', async () => {
+    const db = tinyIDB.open('raw-rw');
+    await db.raw(store => {
+        store.put('direct', 'key');
+    }, 'readwrite');
+    assert.strictEqual(await db.get('key'), 'direct');
+  });
   
   await t.test('getDB error handling', async () => {
     const originalOpen = indexedDB.open;

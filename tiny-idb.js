@@ -52,6 +52,7 @@ const getAPI = (dbName = 'tiny-idb', storeName = undefined) => {
       return k.map((key, i) => [key, v[i]]);
     }),
     count: () => tx(RO, s => prom(s.count())),
+    raw: (cb, mode = RO) => tx(mode, cb),
     update,
     push: (key, val) => update(key, (c = []) => [...(Array.isArray(c) ? c : []), val]),
     merge: (key, obj) => update(key, (c = {}) => ({ ...(c && typeof c === 'object' ? c : {}), ...obj }))
