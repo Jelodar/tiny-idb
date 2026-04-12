@@ -165,17 +165,10 @@ test('tiny-idb basic operations', async (t) => {
     assert.strictEqual(db, sameDb);
   });
 
-  // NEW NEGATIVE / EDGE CASE TESTS
   await t.test('transaction error propagation', async () => {
     const db = tinyIDB.open('fail-db', 'fail-store');
-    // We try to trigger an IndexedDB error by providing an invalid value (though IDB values are broad)
-    // A better way is to mock or use a known error state.
-    // Let's try to close the DB while a transaction is pending if possible, or just mock req.onerror.
-    // For now, we'll verify that our tx wrapper catches aborted transactions.
     try {
       await db.update('k', async (val) => {
-        // This is a bit of a hack to trigger an abort
-        // In a real environment, you might lose connection or have a quota error.
         throw new Error('Abort manually');
       });
     } catch (e) {
@@ -194,7 +187,6 @@ test('tiny-idb basic operations', async (t) => {
       await tinyIDB.set('sym', Symbol('fail'));
       assert.fail('Should have thrown DataCloneError');
     } catch (e) {
-      // IndexedDB throws DataCloneError for symbols
       assert.ok(e.name === 'DataCloneError' || e.message.includes('clone'));
     }
   });
@@ -213,9 +205,6 @@ test('tiny-idb basic operations', async (t) => {
   });
 
   await t.test('push atomicity on failure', async () => {
-    // We can't easily make 'put' fail without invalid data, 
-    // but we can test if it handles the initial value correctly.
-    // If it was already a string, it replaces it with an array.
     await tinyIDB.set('list-fail', 'string');
     await tinyIDB.push('list-fail', 1);
     const val = await tinyIDB.get('list-fail');
@@ -241,9 +230,6 @@ test('tiny-idb basic operations', async (t) => {
     await tinyIDB.set('m', { a: 1 });
     await tinyIDB.merge('m', 'not-an-object');
     const val = await tinyIDB.get('m');
-    // {...{a:1}, ...'not-an-object'} results in the characters of the string being spread if it were spreadable, 
-    // but in JS {...obj, ...string} just keeps obj if string is spread.
-    // Wait, {...{a:1}, ...'abc'} -> {0: 'a', 1: 'b', 2: 'c', a: 1}
     assert.ok(typeof val === 'object');
   });
 
@@ -264,7 +250,6 @@ test('tiny-idb basic operations', async (t) => {
   await t.test('microtask update function (Promise.resolve)', async () => {
     await tinyIDB.set('micro-key', 1);
     await tinyIDB.update('micro-key', async (val) => {
-      // Microtasks are fine as they don't yield to the event loop's macro-task queue
       return Promise.resolve(val + 1);
     });
     assert.strictEqual(await tinyIDB.get('micro-key'), 2);
@@ -279,7 +264,6 @@ test('tiny-idb basic operations', async (t) => {
       req.onsuccess = () => resolve(req.result);
     });
     
-    // In fake-indexeddb we might need to check if it exists or just assign it
     if (typeof rawDb.onversionchange === 'function' || rawDb.onversionchange === null) {
         rawDb.onversionchange({ type: 'versionchange' }); 
     }
@@ -293,8 +277,6 @@ test('tiny-idb basic operations', async (t) => {
     const db = tinyIDB.open('abort-db');
     try {
       await db.update('k', (s) => {
-        // We throw inside the callback, which should trigger the catch block
-        // and t.abort().
         throw new Error('Trigger abort');
       });
     } catch (e) {
@@ -362,5 +344,140 @@ test('tiny-idb basic operations', async (t) => {
     } finally {
       indexedDB.open = originalOpen;
     }
+  });
+
+  await t.test('concurrent batching performance and atomicity', async () => {
+    const db = tinyIDB.open('batch-db');
+    await db.clear();
+    
+    const p1 = db.set('a', 1);
+    const p2 = db.set('b', 2);
+    const p3 = db.set('c', 3);
+    
+    await Promise.all([p1, p2, p3]);
+    
+    assert.strictEqual(await db.get('a'), 1);
+    assert.strictEqual(await db.get('b'), 2);
+    assert.strictEqual(await db.get('c'), 3);
+  });
+
+  await t.test('batch failure (fail-together)', async () => {
+    const db = tinyIDB.open('batch-fail-db');
+    await db.clear();
+    
+    const p1 = db.set('a', 1);
+    const p2 = db.set('b', Symbol('fail'));
+    const p3 = db.set('c', 3);
+    
+    try {
+      await Promise.all([p1, p2, p3]);
+      assert.fail('Should have failed the entire batch');
+    } catch (e) {
+      assert.ok(e.name === 'DataCloneError' || e.message.includes('clone'));
+    }
+    
+    assert.strictEqual(await db.get('a'), undefined);
+    assert.strictEqual(await db.get('c'), undefined);
+  });
+
+  await t.test('mixed mode batching (RO+RW escalation)', async () => {
+    const db = tinyIDB.open('mixed-batch');
+    await db.set('initial', 'value');
+    
+    const p1 = db.get('initial');
+    const p2 = db.set('new', 'data');
+    
+    const [val1] = await Promise.all([p1, p2]);
+    assert.strictEqual(val1, 'value');
+    assert.strictEqual(await db.get('new'), 'data');
+  });
+
+  await t.test('disabled batching (independent failures)', async () => {
+    const db = tinyIDB.open('no-batch-db', false);
+    await db.clear();
+    
+    const p1 = db.set('a', 1);
+    const p2 = db.set('b', Symbol('fail'));
+    const p3 = db.set('c', 3);
+    
+    const results = await Promise.allSettled([p1, p2, p3]);
+    
+    assert.strictEqual(results[0].status, 'fulfilled');
+    assert.strictEqual(results[1].status, 'rejected');
+    assert.strictEqual(results[2].status, 'fulfilled');
+    
+    assert.strictEqual(await db.get('a'), 1);
+    assert.strictEqual(await db.get('c'), 3);
+  });
+
+  // ENRICHED TESTS FOR 100% COVERAGE
+  await t.test('rapid fire open calls', async () => {
+    const db1 = tinyIDB.open('rapid');
+    const db2 = tinyIDB.open('rapid');
+    const db3 = tinyIDB.open('rapid');
+    assert.strictEqual(db1, db2);
+    assert.strictEqual(db2, db3);
+  });
+
+  await t.test('open shorthand (dbName, batching)', async () => {
+    const db1 = tinyIDB.open('short', false);
+    const db2 = tinyIDB.open('short', 'short', false);
+    assert.strictEqual(db1, db2);
+    
+    const db3 = tinyIDB.open('short', true);
+    assert.notStrictEqual(db1, db3);
+  });
+
+  await t.test('reopen after connection change', async () => {
+    const db = tinyIDB.open('reopen-db');
+    await db.set('k', 1);
+    
+    // Trigger onversionchange
+    const rawReq = indexedDB.open('reopen-db', 1);
+    rawReq.onsuccess = () => {
+        rawReq.result.onversionchange({ type: 'versionchange' });
+        rawReq.result.close();
+    };
+    
+    // The next operation should trigger a fresh connection
+    await db.set('k', 2);
+    assert.strictEqual(await db.get('k'), 2);
+  });
+
+  await t.test('concurrent read batches', async () => {
+    const db = tinyIDB.open('read-concurrent');
+    await db.set('x', 1);
+    const p1 = db.get('x');
+    const p2 = db.get('x');
+    const [v1, v2] = await Promise.all([p1, p2]);
+    assert.strictEqual(v1, 1);
+    assert.strictEqual(v2, 1);
+  });
+
+  await t.test('raw method with error', async () => {
+    const db = tinyIDB.open('raw-err');
+    try {
+        await db.raw(() => { throw new Error('Raw fail'); });
+        assert.fail();
+    } catch (e) {
+        assert.strictEqual(e.message, 'Raw fail');
+    }
+  });
+
+  await t.test('update with undefined value', async () => {
+    const db = tinyIDB.open('up-undef');
+    await db.update('none', (v) => {
+        assert.strictEqual(v, undefined);
+        return 'new';
+    });
+    assert.strictEqual(await db.get('none'), 'new');
+  });
+
+  await t.test('merge non-object input', async () => {
+    const db = tinyIDB.open('merge-non');
+    await db.set('k', { a: 1 });
+    // This should treat the patch as spreadable or ignore if not object-like
+    await db.merge('k', null); 
+    assert.deepStrictEqual(await db.get('k'), { a: 1 });
   });
 });

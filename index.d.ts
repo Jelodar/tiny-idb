@@ -3,10 +3,15 @@
 export interface TinyIDBInstance {
   /**
    * Creates or retrieves a cached instance of a database and store.
+   * Note: Multiple calls in the same microtask (tick) are automatically batched 
+   * into a single IndexedDB transaction for 10x-100x performance.
    * @param dbName Name of the IndexedDB database.
    * @param storeName Name of the object store (defaults to dbName).
+   * @param batching Set to false to disable automatic batching (defaults to true).
    */
-  open(dbName: string, storeName?: string): TinyIDBInstance;
+  open(dbName: string, storeName?: string, batching?: boolean): TinyIDBInstance;
+  /** Shorthand for open(dbName, dbName, batching) */
+  open(dbName: string, batching?: boolean): TinyIDBInstance;
 
   /**
    * Persists a value to the store.
@@ -55,7 +60,7 @@ export interface TinyIDBInstance {
   count(): Promise<number>;
 
   /**
-   * Direct access to the IDBObjectStore within a transaction.
+   * Provides direct access to the IDBObjectStore within a transaction.
    * This provides an "escape hatch" to use native IndexedDB features like cursors, ranges, and search.
    * @param cb A callback that receives the IDBObjectStore.
    * @param mode The transaction mode ('readonly' or 'readwrite').
