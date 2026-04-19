@@ -1,6 +1,6 @@
 {
   "name": "tiny-idb",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "An extremely fast, super simple, and dependency-free IndexedDB wrapper. A drop-in replacement for localStorage with reliability and durability.",
   "main": "tiny-idb.js",
   "module": "tiny-idb.js",
