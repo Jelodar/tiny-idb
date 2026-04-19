@@ -51,6 +51,8 @@ npm run build
 
 ## API
 
+### Methods
+
 | Method | Description |
 |--------|-------------|
 | `open(dbName, storeName?, batching?)` | Creates or retrieves a cached instance. `storeName` defaults to `dbName`. `batching` (default `true`) pipelines calls in the same microtask. |
@@ -72,10 +74,17 @@ npm run build
 | `getItem(key)` | Alias for `get(key)`. |
 | `setItem(key, value)` | Alias for `set(key, value)`. |
 | `removeItem(key)` | Alias for `remove(key)`. |
-| `MODE_RO` | Constant for `raw()` mode: `'readonly'`. |
-| `MODE_RW` | Constant for `raw()` mode: `'readwrite'`. |
-| `DIR_NEXT` | Constant for `paginate()` direction: `'next'`. |
-| `DIR_PREV` | Constant for `paginate()` direction: `'prev'`. |
+
+### Constants
+
+Available as named exports or on the `db` instance.
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MODE_RO` | `'readonly'` | Default mode for `raw()`. |
+| `MODE_RW` | `'readwrite'` | Read-write mode for `raw()`. |
+| `DIR_NEXT` | `'next'` | Forward direction for `paginate()`. |
+| `DIR_PREV` | `'prev'` | Reverse direction for `paginate()`. |
 
 ## Guarantees
 
