@@ -1,10 +1,14 @@
 # tiny-idb
 
-**A minimalist, high-performance IndexedDB wrapper for modern web applications.**
+**A tiny IndexedDB wrapper for simple key/value persistence.**
 
-`tiny-idb` provides a non-blocking, asynchronous alternative to `localStorage`. While `localStorage` is capped at ~5-10MB and can be cleared by the browser under memory pressure, `tiny-idb` leverages IndexedDB to offer virtually unlimited storage (up to 80% of disk space) with much higher durability.
+`tiny-idb` is the small, async alternative to `localStorage` when you want IndexedDB durability without taking on IndexedDB ceremony. It stays intentionally narrow:
 
-It is designed for developers who require the reliability and capacity of IndexedDB without the complexity of its native API. By focusing on a single-store, key-value architecture, it eliminates the need for database versioning and boilerplate configuration.
+- automatic multi-store support within a single database
+- promise-based reads and writes
+- atomic read-modify-write helpers
+- cursor-based iteration with filtering and pagination
+- `raw()` for native IndexedDB escape hatches
 
 [![NPM Version](https://img.shields.io/npm/v/tiny-idb.svg)](https://www.npmjs.com/package/tiny-idb)
 [![License](https://img.shields.io/npm/l/tiny-idb.svg)](LICENSE)
@@ -12,208 +16,28 @@ It is designed for developers who require the reliability and capacity of Indexe
 
 ## Why tiny-idb?
 
-There are many IndexedDB wrappers, but `tiny-idb` is built with a specific philosophy: **Smallest possible footprint without sacrificing data integrity.**
+- **Tiny footprint.** The minified bundle is about 1KB gzipped.
+- **Async API.** No synchronous main-thread storage calls.
+- **Atomic helpers.** `update()`, `push()`, and `merge()` run inside one IndexedDB transaction, avoiding race conditions.
+- **Automatic batching.** Calls made in the same microtask are pipelined into one transaction by default for massive performance gains.
+- **Efficient iteration.** Memory-friendly cursor-based scans for entries and pagination.
 
--   **Smaller than most icons**: At less than 1KB (gzipped), it's lighter than a 16x16 PNG.
--   **Atomic Operations**: Built-in `update`, `push`, and `merge` are ACID-compliant and race-condition safe. No more partial updates or data loss.
--   **Zero dependencies**: Built on pure vanilla JS. No external bloat.
--   **Drop-in localStorage replacement**: Use the same `getItem`, `setItem`, `removeItem` calls, but with `await`.
+### How it compares
 
-## Core Advantages
-
-### Architectural Simplicity
-Native IndexedDB requires managing requests, transactions, and version upgrades. `tiny-idb` abstracts these into a predictable, promise-based API. It acts as a drop-in replacement for `localStorage` logic, allowing for an immediate transition to persistent, non-blocking storage.
-
-### Guaranteed Atomicity
-The primary weakness of most storage wrappers is the "read-modify-write" race condition. If two parts of an application attempt to update the same key simultaneously, data loss often occurs. `tiny-idb` addresses this by executing `update`, `push`, and `merge` operations within a single IndexedDB transaction, ensuring that updates are processed sequentially and reliably.
-
-### Automatic Transaction Batching (Pipelining)
-`tiny-idb` automatically batches multiple operations (`set`, `get`, `update`, etc.) called in the same microtask (event loop tick) into a **single IndexedDB transaction**. This provides a **10x to 100x performance boost** for concurrent operations (like `Promise.all`) without changing any code.
-
-### Resource Efficiency
-At **less than 1KB** (gzipped), the library introduces negligible overhead to your bundle. It is dependency-free and written in modern vanilla JavaScript, ensuring high performance across all environments that support IndexedDB.
-
-### Intelligent Lifecycle Management
-The library handles database connection pooling, tab synchronization, and error recovery automatically. If a database connection is blocked by another tab or fails due to an environmental error, `tiny-idb` gracefully resets and recovers without requiring a page reload.
+| Feature | `localStorage` | `idb-keyval` | `localForage` | `Dexie` | `tiny-idb` |
+|---------|:---:|:---:|:---:|:---:|:---:|
+| Size | N/A | ~1KB | ~10KB | ~30KB | **~1KB** |
+| Async | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Atomic Updates | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Auto-Batching | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Pagination | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Multi-Store | ❌ | ✅ | ✅ | ✅ | ✅ |
 
 ## Installation
 
 ```bash
 npm install tiny-idb
 ```
-
-### CDN Usage
-
-```html
-<script type="module">
-  import { tinyIDB as db } from 'https://unpkg.com/tiny-idb/tiny-idb.min.js';
-</script>
-```
-
-## API Reference
-
-| Method | Description |
-|--------|-------------|
-| `open(db, store?, batch?)` | Creates or retrieves a cached instance. `batch` defaults to `true`. |
-| `get(key)` | Retrieves a value; returns `undefined` if not found. |
-| `set(key, value)` | Persists a value to the store. |
-| `remove(key)` | Deletes a specific key. |
-| `clear()` | Removes all data from the store. |
-| `keys()` | Returns an array of all keys. |
-| `values()` | Returns an array of all values. |
-| `entries()` | Returns an array of `[key, value]` pairs. |
-| `count()` | Returns the total number of entries. |
-| `raw(cb, mode?)` | Provides direct access to the `IDBObjectStore`. |
-| `update(key, fn)` | Performs an **atomic** read-modify-write. |
-| `push(key, value)` | **Atomically** appends to an array. |
-| `merge(key, patch)` | **Atomically** shallow-merges an object. |
-
-## Examples (Easy to Advanced)
-
-### 1. localStorage Compatibility
-Use `tiny-idb` as a drop-in replacement for `localStorage`. Just add `await`.
-```javascript
-import { tinyIDB as db } from 'tiny-idb';
-
-await db.setItem('session_id', 'xyz-123');
-const sid = await db.getItem('session_id');
-await db.removeItem('session_id');
-```
-
-### 2. Simple Custom Database
-If you only need one store per database, you can omit the `storeName`.
-```javascript
-import { tinyIDB as db } from 'tiny-idb';
-
-// Creates/retrieves a DB named 'my-store' with an internal store also named 'my-store'
-const store = db.open('my-store');
-await store.set('key', 'value');
-```
-
-### 3. Atomic Counters
-Safely increment values using the `update` method.
-```javascript
-import { tinyIDB as db } from 'tiny-idb';
-
-await db.set('page_views', 0);
-
-// Increment safely - even if multiple tabs do it at once
-await db.update('page_views', count => (count || 0) + 1);
-```
-
-### 4. User Settings Management (Atomic Merge)
-Easily manage and update partial user preferences without worrying about race conditions.
-```javascript
-import { tinyIDB as db } from 'tiny-idb';
-
-// Initial setup
-await db.set('settings', { theme: 'dark', notifications: true });
-
-// Later, merge new settings
-await db.merge('settings', { notifications: false, language: 'en' });
-
-// Result: { theme: 'dark', notifications: false, language: 'en' }
-```
-
-### 5. Persistent Shopping Cart (Atomic Push)
-Atomically add items to a list, ensuring no items are lost during concurrent updates.
-```javascript
-import { tinyIDB as db } from 'tiny-idb';
-
-await db.push('cart', { id: 101, qty: 1 });
-await db.push('cart', { id: 202, qty: 2 });
-```
-
-### 6. Storing Binary Data (Blobs/Files)
-Unlike `localStorage`, `tiny-idb` can store binary data directly.
-```javascript
-import { tinyIDB as db } from 'tiny-idb';
-
-const response = await fetch('/profile-picture.jpg');
-const blob = await response.blob();
-
-await db.set('user_avatar', blob);
-
-const avatar = await db.get('user_avatar');
-document.querySelector('img').src = URL.createObjectURL(avatar);
-```
-
-### 7. Iterating over Data
-Use `entries()` to process all stored key-value pairs efficiently.
-```javascript
-import { tinyIDB as db } from 'tiny-idb';
-
-const allEntries = await db.entries();
-for (const [key, value] of allEntries) {
-  console.log(`${key}:`, value);
-}
-```
-
-### 8. Multi-Instance Support
-Use `open` to create isolated storage instances.
-```javascript
-import { tinyIDB as db } from 'tiny-idb';
-
-const settings = db.open('app-db', 'settings');
-const cache = db.open('app-db', 'cache');
-
-await settings.set('theme', 'dark');
-await cache.set('temp_data', { id: 1 });
-```
-
-### 9. Advanced: Direct IndexedDB Access (Cursors & Search)
-Use `raw()` for custom searches or when working with extremely large datasets.
-```javascript
-import { tinyIDB as db } from 'tiny-idb';
-
-const results = await db.raw(store => {
-  return new Promise((resolve) => {
-    const matches = [];
-    const request = store.openCursor();
-    request.onsuccess = () => {
-      const cursor = request.result;
-      if (cursor) {
-        if (cursor.value.type === 'urgent') matches.push(cursor.value);
-        cursor.continue();
-      } else resolve(matches);
-    };
-  });
-});
-```
-
-### 10. Advanced: Disabling Batching
-If you need strict one-transaction-per-operation behavior (e.g., for debugging), you can disable the default batching.
-```javascript
-import { tinyIDB as db } from 'tiny-idb';
-
-// Disable batching for a specific instance
-const debugDB = db.open('debug-db', false); 
-```
-
-> **Optimization Note:** While `entries()` is sufficient for most apps, developers working with **extremely large datasets** (100k+ records) should use `raw()` with a cursor to minimize memory overhead.
-> ```javascript
-> // Memory-efficient search for a massive dataset
-> const activeUser = await db.raw(store => new Promise(res => {
->   const req = store.openCursor();
->   req.onsuccess = () => {
->     const cursor = req.result;
->     if (!cursor || cursor.value.status === 'active') res(cursor?.value);
->     else cursor.continue();
->   };
-> }));
-> ```
-
-## Browser Support
-
-Supported by virtually all browsers in use today (99%+ market share). Since [May 2018](https://caniuse.com/es6-module), this feature works across the latest devices and major browser versions:
-- **Chrome** 61+
-- **Firefox** 60+
-- **Safari** 11+
-- **Edge** 16+
-
-## Development
-
-`tiny-idb` is written in pure vanilla JavaScript. No compilation is required for development.
 
 ### Running Tests
 ```bash
@@ -223,6 +47,247 @@ npm test
 ### Building & Minification
 ```bash
 npm run build
+```
+
+## API
+
+| Method | Description |
+|--------|-------------|
+| `open(dbName, storeName?, batching?)` | Creates or retrieves a cached instance. `storeName` defaults to `dbName`. `batching` (default `true`) pipelines calls in the same microtask. |
+| `open(dbName, batching)` | Shorthand for `open(dbName, dbName, batching)`. |
+| `get(key)` | Returns the value for `key`, or `undefined`. |
+| `set(key, value)` | Stores `value` at `key`. |
+| `remove(key)` | Deletes `key`. |
+| `clear()` | Removes every entry in the store. |
+| `keys()` | Returns all keys. |
+| `values()` | Returns all values. |
+| `entries(filter?)` | Returns `[key, value]` pairs. `filter` is called with `(value, key)`. |
+| `paginate(limit, start?, dir?, filter?)` | Returns `{ items, next }` for paginated scans. |
+| `count()` | Returns the number of entries. |
+| `has(key)` | Returns true if `key` exists. |
+| `raw(cb, mode?)` | Runs `cb` with the native `IDBObjectStore`. |
+| `update(key, fn)` | Atomically replaces a value using `fn(currentValue)`. |
+| `push(key, value)` | Atomically appends `value` to an array. |
+| `merge(key, patch)` | Atomically shallow-merges a non-null object patch. |
+| `getItem(key)` | Alias for `get(key)`. |
+| `setItem(key, value)` | Alias for `set(key, value)`. |
+| `removeItem(key)` | Alias for `remove(key)`. |
+| `MODE_RO` | Constant for `raw()` mode: `'readonly'`. |
+| `MODE_RW` | Constant for `raw()` mode: `'readwrite'`. |
+| `DIR_NEXT` | Constant for `paginate()` direction: `'next'`. |
+| `DIR_PREV` | Constant for `paginate()` direction: `'prev'`. |
+
+## Guarantees
+
+- `set`, `remove`, `clear`, `update`, `push`, and `merge` run inside IndexedDB transactions.
+- `update`, `push`, and `merge` avoid the usual read-modify-write race.
+- Batched calls in the same microtask share one transaction unless batching is disabled.
+- `merge()` rejects invalid patches instead of coercing them.
+- Callbacks passed to `update()` and `raw()` must stay within the transaction lifetime.
+
+## Browser Support
+
+Supported by virtually all browsers in use today (99%+ market share). Since [May 2018](https://caniuse.com/es6-module), this feature works across the latest devices and major browser versions:
+- **Chrome** 71+
+- **Firefox** 69+
+- **Safari** 12.1+
+- **Edge** 79+
+
+## Development
+
+`tiny-idb` is written in pure vanilla JavaScript. No compilation is required for development.
+
+## Usage
+
+You can use either the default export or the named `tinyIDB` export. They are identical:
+
+```js
+import db from 'tiny-idb';
+// OR
+import { tinyIDB as db } from 'tiny-idb';
+```
+
+### localStorage-style calls
+
+```js
+await db.setItem('session_id', 'xyz-123');
+const sessionId = await db.getItem('session_id');
+await db.removeItem('session_id');
+```
+
+### Custom database and multi-store
+
+```js
+// Separate databases (store name defaults to db name)
+const settings = db.open('app-settings');
+
+// Disable automatic microtask batching
+const noBatch = db.open('my-db', false);
+
+// Multiple stores in the same database
+const users = db.open('my-app', 'users');
+const logs = db.open('my-app', 'logs');
+
+await settings.set('theme', 'dark');
+await users.set(42, { name: 'Alice' });
+await logs.push('recent', 'User 42 logged in');
+```
+
+### Atomic counter
+
+```js
+await db.set('page_views', 0);
+await db.update('page_views', (count) => (count || 0) + 1);
+```
+
+### Atomic array append
+
+```js
+await db.push('cart', { id: 101, qty: 1 });
+await db.push('cart', { id: 202, qty: 2 });
+```
+
+### Atomic object merge
+
+```js
+await db.set('settings', { theme: 'dark', notifications: true });
+await db.merge('settings', { notifications: false, language: 'en' });
+```
+
+### Automatic Batching (Performance)
+
+One of the most powerful features of `tiny-idb` is its automatic transaction pipelining. IndexedDB transactions are expensive to open. `tiny-idb` caches calls made in the same microtask (tick) and executes them in a single transaction.
+
+```js
+// These 3 calls happen in the same tick.
+// tiny-idb automatically combines them into ONE 'readwrite' transaction.
+// This is 10x-100x faster than 3 separate transactions.
+db.set('user', 'alice');
+db.set('theme', 'dark');
+db.set('notifications', true);
+
+// You can wait for all at once
+await Promise.all([ /* ... promises from above ... */ ]);
+```
+
+### TypeScript Support
+
+`tiny-idb` comes with full TypeScript definitions. You can use generics to type your retrieved data:
+
+```ts
+interface User {
+  name: string;
+  age: number;
+}
+
+// Typing a single retrieval
+const user = await db.get<User>('user:1');
+
+// Typing iteration
+const users = await db.entries<string, User>();
+// users is [string, User][]
+
+// Typing pagination
+const page = await db.paginate<string, User>(10);
+// page.items is [string, User][]
+```
+
+### Binary data
+
+```js
+const blob = await (await fetch('/profile.jpg')).blob();
+await db.set('user_avatar', blob);
+```
+
+### Filtered Iteration
+
+```js
+// Scans and returns only users over 18
+const isAdult = (user) => user.age >= 18;
+const adults = await db.entries(isAdult);
+
+// Scans only keys with a specific prefix
+const isLog = (val, key) => key.startsWith('log:');
+const logs = await db.entries(isLog);
+```
+
+### Pagination
+
+```js
+import db from 'tiny-idb';
+
+// 1. Fetch first 10 items
+const page1 = await db.paginate(10);
+console.log(page1.items); // [[key1, val1], [key2, val2], ...]
+
+// 2. Fetch next 10 items starting from where we left off
+// Tip: 'next' is the exact key to start the next page with (no duplicates).
+if (page1.next) {
+  const page2 = await db.paginate(10, page1.next);
+}
+
+// 3. Reverse pagination (fetch 10 newest items)
+const { items: latest } = await db.paginate(10, null, db.DIR_PREV);
+
+// 4. Pagination with a filter and direction
+// Define filter separately for readability (e.g. items over $120)
+const isExpensive = (item) => item.price > 120;
+const { items: premiumItems } = await db.paginate(10, null, db.DIR_PREV, isExpensive);
+```
+
+## `update()` and `raw()` callback rules
+
+The callback must finish while the transaction is still alive.
+
+Safe:
+- Synchronous logic.
+- Microtask-only async such as `Promise.resolve(...)`.
+- Returning an IndexedDB request promise (e.g. from `store.get()` or `store.put()`).
+
+Unsafe:
+- `setTimeout` or `setInterval`.
+- Network requests (fetch).
+- Long `await` chains unrelated to the current transaction.
+
+## Recipes
+
+### Prefix scan
+
+```js
+import { tinyIDB as db } from 'tiny-idb';
+
+const todos = await db.raw((store) => new Promise((resolve, reject) => {
+  const range = IDBKeyRange.bound('todo:', 'todo:\uffff');
+  const req = store.openCursor(range);
+  const matches = [];
+  req.onsuccess = () => {
+    const cursor = req.result;
+    if (!cursor) return resolve(matches);
+    matches.push([cursor.key, cursor.value]);
+    cursor.continue();
+  };
+}));
+```
+
+### Custom Key Range
+
+```js
+import { tinyIDB as db } from 'tiny-idb';
+
+// Paginate only within a specific key range
+// Accepts both a starting key or a full IDBKeyRange
+const range = IDBKeyRange.bound('user:a', 'user:f');
+const { items } = await db.paginate(20, range);
+```
+
+### Direct Write with raw()
+
+```js
+import { tinyIDB as db } from 'tiny-idb';
+
+// Direct write without manual promise wrapping. 
+// raw() resolves only after the transaction completes.
+await db.raw((store) => store.put('value', 'key'), db.MODE_RW);
 ```
 
 ## License

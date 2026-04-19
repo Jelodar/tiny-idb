@@ -63,6 +63,13 @@ test('tiny-idb basic operations', async (t) => {
     assert.strictEqual(count, 2);
   });
 
+  await t.test('has key', async () => {
+    await tinyIDB.clear();
+    await tinyIDB.set('h1', 1);
+    assert.strictEqual(await tinyIDB.has('h1'), true);
+    assert.strictEqual(await tinyIDB.has('h2'), false);
+  });
+
   await t.test('atomic update', async () => {
     await tinyIDB.set('count', 10);
     await tinyIDB.update('count', (c) => c + 5);
@@ -151,6 +158,17 @@ test('tiny-idb basic operations', async (t) => {
     assert.strictEqual(await dbB.get('key'), 'valueB');
   });
 
+  await t.test('same database can add a second store later', async () => {
+    const settings = tinyIDB.open('multi-store-db', 'settings');
+    const cache = tinyIDB.open('multi-store-db', 'cache');
+
+    await settings.set('theme', 'dark');
+    await cache.set('temp_data', { id: 1 });
+    
+    assert.strictEqual(await settings.get('theme'), 'dark');
+    assert.deepStrictEqual(await cache.get('temp_data'), { id: 1 });
+  });
+
   await t.test('open returns same instance for same names', async () => {
     const db1 = tinyIDB.open('same-db', 'same-s');
     const db2 = tinyIDB.open('same-db', 'same-s');
@@ -226,11 +244,13 @@ test('tiny-idb basic operations', async (t) => {
     assert.deepStrictEqual(val, { a: 1 });
   });
 
-  await t.test('merge with non-object patch', async () => {
+  await t.test('merge with non-object patch should fail', async () => {
     await tinyIDB.set('m', { a: 1 });
-    await tinyIDB.merge('m', 'not-an-object');
-    const val = await tinyIDB.get('m');
-    assert.ok(typeof val === 'object');
+    await assert.rejects(
+      tinyIDB.merge('m', 'not-an-object'),
+      (e) => e instanceof TypeError && e.message === 'merge patch must be a non-null object'
+    );
+    assert.deepStrictEqual(await tinyIDB.get('m'), { a: 1 });
   });
 
   await t.test('push with undefined initial', async () => {
@@ -253,6 +273,19 @@ test('tiny-idb basic operations', async (t) => {
       return Promise.resolve(val + 1);
     });
     assert.strictEqual(await tinyIDB.get('micro-key'), 2);
+  });
+
+  await t.test('update rejects when callback crosses a task boundary', async () => {
+    const db = tinyIDB.open('update-async-boundary');
+    await db.set('k', 1);
+    await assert.rejects(
+      db.update('k', async (val) => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return val + 1;
+      }),
+      (e) => e?.name === 'TransactionInactiveError'
+    );
+    assert.strictEqual(await db.get('k'), 1);
   });
 
   await t.test('onversionchange handling', async () => {
@@ -380,6 +413,17 @@ test('tiny-idb basic operations', async (t) => {
     assert.strictEqual(await db.get('c'), undefined);
   });
 
+  await t.test('constants are exposed', async () => {
+    assert.strictEqual(tinyIDB.MODE_RO, 'readonly');
+    assert.strictEqual(tinyIDB.MODE_RW, 'readwrite');
+    assert.strictEqual(tinyIDB.DIR_NEXT, 'next');
+    assert.strictEqual(tinyIDB.DIR_PREV, 'prev');
+
+    const db2 = tinyIDB.open('other');
+    assert.strictEqual(db2.MODE_RO, 'readonly');
+    assert.strictEqual(db2.MODE_RW, 'readwrite');
+  });
+
   await t.test('mixed mode batching (RO+RW escalation)', async () => {
     const db = tinyIDB.open('mixed-batch');
     await db.set('initial', 'value');
@@ -425,7 +469,7 @@ test('tiny-idb basic operations', async (t) => {
     assert.strictEqual(db1, db2);
     
     const db3 = tinyIDB.open('short', true);
-    assert.notStrictEqual(db1, db3);
+    assert.strictEqual(db1, db3);
   });
 
   await t.test('reopen after connection change', async () => {
@@ -476,8 +520,239 @@ test('tiny-idb basic operations', async (t) => {
   await t.test('merge non-object input', async () => {
     const db = tinyIDB.open('merge-non');
     await db.set('k', { a: 1 });
-    // This should treat the patch as spreadable or ignore if not object-like
-    await db.merge('k', null); 
+    await assert.rejects(
+      db.merge('k', null),
+      (e) => e instanceof TypeError && e.message === 'merge patch must be a non-null object'
+    );
     assert.deepStrictEqual(await db.get('k'), { a: 1 });
   });
+
+  await t.test('entries on empty store', async () => {
+    const db = tinyIDB.open('empty-store');
+    await db.clear();
+    const entries = await db.entries();
+    assert.deepStrictEqual(entries, []);
+  });
+
+  await t.test('concurrent store creation in same DB', async () => {
+    const dbName = 'concurrent-db';
+    // Start two opens simultaneously
+    const db1 = tinyIDB.open(dbName, 'store1');
+    const db2 = tinyIDB.open(dbName, 'store2');
+    
+    // Perform operations simultaneously
+    await Promise.all([
+      db1.set('a', 1),
+      db2.set('b', 2)
+    ]);
+    
+    assert.strictEqual(await db1.get('a'), 1);
+    assert.strictEqual(await db2.get('b'), 2);
+  });
+
+  await t.test('transaction aborted externally', async () => {
+    const db = tinyIDB.open('external-abort');
+    await db.set('k', 1);
+    try {
+      await db.raw((store) => {
+        store.transaction.abort();
+      });
+      assert.fail('Should have thrown Aborted');
+    } catch (e) {
+      assert.ok(e.message.includes('Abort') || e.name === 'AbortError');
+    }
+  });
+
+  await t.test('raw method with invalid mode', async () => {
+    const db = tinyIDB.open('invalid-mode');
+    try {
+      await db.raw(() => {}, 'invalid');
+      assert.fail('Should have failed due to invalid IDB mode');
+    } catch (e) {
+      // Log for debugging
+      // console.log('Invalid mode error:', e);
+      assert.ok(e instanceof TypeError || e.name === 'TypeError' || e.name === 'InvalidStateError' || e.message.includes('mode'));
+    }
+  });
+
+  await t.test('open with swapped arguments validation', async () => {
+    const db1 = tinyIDB.open('swapped', false); // db, batching
+    const db2 = tinyIDB.open('swapped', 'swapped', false); // db, store, batching
+    assert.strictEqual(db1, db2);
+  });
+
+  await t.test('consecutive flushes with different modes', async () => {
+    const db = tinyIDB.open('modes-db');
+    const p1 = db.get('x'); // RO
+    const p2 = db.set('x', 1); // RW
+    const p3 = db.get('x'); // RO
+    
+    // All should be batched into one RW transaction
+    await Promise.all([p1, p2, p3]);
+    assert.strictEqual(await db.get('x'), 1);
+  });
+
+  await t.test('entries with filter function', async () => {
+    const db = tinyIDB.open('filter-db');
+    await db.clear();
+    await db.set(1, { age: 20 });
+    await db.set(2, { age: 30 });
+    await db.set(3, { age: 40 });
+    
+    const adults = await db.entries((v) => v.age >= 30);
+    assert.strictEqual(adults.length, 2);
+    assert.deepStrictEqual(adults[0], [2, { age: 30 }]);
+    assert.deepStrictEqual(adults[1], [3, { age: 40 }]);
+  });
+
+  await t.test('entries filter with key', async () => {
+    const db = tinyIDB.open('filter-key-db');
+    await db.clear();
+    await db.set('user:1', 'a');
+    await db.set('user:2', 'b');
+    await db.set('admin:1', 'c');
+    
+    const users = await db.entries((v, k) => k.startsWith('user:'));
+    assert.strictEqual(users.length, 2);
+    assert.deepStrictEqual(users[0], ['user:1', 'a']);
+  });
+
+  await t.test('paginate basic functionality', async () => {
+    const db = tinyIDB.open('page-db');
+    await db.clear();
+    for (let i = 1; i <= 5; i++) await db.set(i, `val${i}`);
+    
+    const page1 = await db.paginate(2);
+    assert.strictEqual(page1.items.length, 2);
+    assert.deepStrictEqual(page1.items[0], [1, 'val1']);
+    assert.strictEqual(page1.next, 3);
+    
+    const page2 = await db.paginate(2, page1.next);
+    assert.strictEqual(page2.items.length, 2);
+    assert.deepStrictEqual(page2.items[0], [3, 'val3']);
+    assert.strictEqual(page2.next, 5);
+  });
+
+  await t.test('paginate with filter and direction', async () => {
+    const db = tinyIDB.open('page-dir-db');
+    await db.clear();
+    await db.set(1, { price: 50 });
+    await db.set(2, { price: 150 });
+    await db.set(3, { price: 200 });
+    await db.set(4, { price: 300 });
+    await db.set(5, { price: 80 });
+    
+    const isPremium = (item) => item.price > 120;
+    const page = await db.paginate(10, null, 'prev', isPremium);
+    assert.strictEqual(page.items.length, 3);
+    assert.deepStrictEqual(page.items[0], [4, { price: 300 }]);
+    assert.deepStrictEqual(page.items[1], [3, { price: 200 }]);
+    assert.deepStrictEqual(page.items[2], [2, { price: 150 }]);
+    assert.strictEqual(page.next, null);
+  });
+
+  await t.test('paginate with direction as 3rd arg', async () => {
+    const db = tinyIDB.open('page-flex-db');
+    await db.clear();
+    for (let i = 1; i <= 3; i++) await db.set(i, i);
+    
+    // Test dir as 3rd arg: paginate(limit, start, dir)
+    const page = await db.paginate(10, null, 'prev');
+    assert.strictEqual(page.items.length, 3);
+    assert.deepStrictEqual(page.items[0], [3, 3]);
+    assert.deepStrictEqual(page.items[2], [1, 1]);
+  });
+
+  await t.test('paginate with Date keys', async () => {
+    const db = tinyIDB.open('page-date-db');
+    await db.clear();
+    const d1 = new Date(2023, 0, 1);
+    const d2 = new Date(2023, 0, 2);
+    const d3 = new Date(2023, 0, 3);
+    await db.set(d1, 'v1');
+    await db.set(d2, 'v2');
+    await db.set(d3, 'v3');
+
+    const page1 = await db.paginate(2, d1);
+    assert.strictEqual(page1.items.length, 2);
+    assert.deepStrictEqual(page1.items[0], [d1, 'v1']);
+    assert.deepStrictEqual(page1.items[1], [d2, 'v2']);
+    assert.deepStrictEqual(page1.next, d3);
+  });
+
+  await t.test('batch atomicity: individual promises should not resolve falsely', async () => {
+    const db = tinyIDB.open('batch-atomicity-rigorous');
+    await db.clear();
+
+    let p1Resolved = false;
+    const p1 = db.set('a', 1).then(() => {
+      p1Resolved = true;
+    });
+
+    // Cause a failure in the same batch
+    const p2 = db.set('b', Symbol('fail'));
+
+    try {
+      await Promise.all([p1, p2]);
+    } catch (e) {
+      // Expected failure
+    }
+
+    assert.strictEqual(p1Resolved, false, 'p1 should NOT have resolved because the batch failed');
+    assert.strictEqual(await db.get('a'), undefined, 'a should not be in DB');
+  });
+
+  await t.test('paginate: inclusivity check', async () => {
+    const db = tinyIDB.open('page-inc');
+    await db.clear();
+    await db.set(1, 'a');
+    await db.set(2, 'b');
+    await db.set(3, 'c');
+
+    // Starting at 2 should include 2
+    const page = await db.paginate(10, 2);
+    assert.strictEqual(page.items[0][0], 2);
+    assert.strictEqual(page.items.length, 2);
+  });
+
+  await t.test('paginate: always returns object even if limit is null', async () => {
+    const db = tinyIDB.open('page-object');
+    await db.clear();
+    await db.set(1, 'a');
+    
+    const result = await db.paginate(null);
+    assert.ok(!Array.isArray(result));
+    assert.strictEqual(typeof result, 'object');
+    assert.deepStrictEqual(result.items, [[1, 'a']]);
+    assert.strictEqual(result.next, null);
+    
+    const reverse = await db.paginate(null, null, 'prev');
+    assert.ok(!Array.isArray(reverse));
+    assert.deepStrictEqual(reverse.items, [[1, 'a']]);
+  });
+
+  await t.test('paginate: avoid duplication between pages', async () => {
+    const db = tinyIDB.open('page-dupe-check');
+    await db.clear();
+    for (let i = 1; i <= 5; i++) await db.set(i, i);
+    
+    // Page 1: [1, 2], next: 3
+    const page1 = await db.paginate(2);
+    assert.deepStrictEqual(page1.items.map(i => i[0]), [1, 2]);
+    assert.strictEqual(page1.next, 3);
+    
+    // Page 2: [3, 4], next: 5
+    const page2 = await db.paginate(2, page1.next);
+    assert.deepStrictEqual(page2.items.map(i => i[0]), [3, 4]);
+    assert.strictEqual(page2.next, 5);
+    
+    // Page 3: [5], next: null
+    const page3 = await db.paginate(2, page2.next);
+    assert.deepStrictEqual(page3.items.map(i => i[0]), [5]);
+    assert.strictEqual(page3.next, null);
+  });
 });
+
+
+
+
